@@ -1,86 +1,90 @@
 import os
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask
-from flask import render_template
+from flask import Flask, render_template, flash
 import atexit
 import urllib.request, json
-from db import get_db
+from .db import init_app, get_db
 
 def create_app(test_config=None):
-    # create and configure the app
+    """
+    create and configure the app and creates the different pages
+    """
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_mapping(
         SECRET_KEY='dev',
         DATABASE=os.path.join(app.instance_path, 'flaskr.sqlite'),
     )
 
-    if test_config is None:
-        # load the instance config, if it exists, when not testing
-        app.config.from_pyfile('config.py', silent=True)
-    else:
-        # load the test config if passed in
-        app.config.from_mapping(test_config)
-
-    # ensure the instance folder exists
-    try:
-        os.makedirs(app.instance_path)
-    except OSError:
-        pass
-
-
-
-    # a simple page that says hello
+    
     @app.route('/')
     def home():
+        """
+        very simple home page with just 1 button to get to the get_jokes page
+        """
         return render_template('base.html')
 
     @app.route('/get_jokes')
     def get_jokes():
+        """
+        simple page which fetches a joke and saves it to the db
+        """
         with app.app_context():
             joke = fetcher()
-            save_joke(joke)
+            error = save_joke(joke)
+            #if error is not None:
+            #    flash(error)
         return joke
 
-    @app.route('/view_jokes')
-    def view_jokes():
-        return render_template('view_jokes.html')
-
+    """
+    the scheduler calls in an interval of 60 seconds the get_jokes funktion
+    """
     scheduler = BackgroundScheduler()
     scheduler.add_job(func=get_jokes, trigger="interval", seconds=60)
     scheduler.start()
 
     atexit.register(lambda: scheduler.shutdown())
 
-    import db
-    db.init_app(app)
+    init_app(app)
 
     return app
 
 
 def fetcher():
+    """
+    this function fetches a joke from the jokeapi and returns it
+    """
     url = 'https://v2.jokeapi.dev/joke/Any'
     response = urllib.request.urlopen(url)
     data = response.read()
     joke_data = json.loads(data)
-    print(joke_data)
     return joke_data
 
 def save_joke(joke):
+    """
+    This function checks whether the joke is a twopart joke and if so converts it to a single part joke
+    Then it checks if the joke is safe and converts the boolean to 0 or 1 
+    Lastly it checks if the joke is already in the db, in which case an error is returned. 
+    Otherwise the joke is saved into the database
+    """
     db = get_db()
-    false = None
-
+    error = None
     if joke['type'] == 'twopart':
         joke['joke'] = joke['setup'] + '\n' + joke['delivery']
 
-    if joke['safe'] == 'false':
+    if joke['safe'] == 'False':
         safe = 0
     else:
         safe = 1
 
-    if joke['error'] is None:
-        db.execute(
-            "INSERT INTO joke (category, joke, flags) VALUE (?,?,?)", 
-            (joke['category'], joke['joke'], safe),
-        )
-        db.commit()
+    if joke['error'] is False:
+        try:
+            db.execute(
+                "INSERT INTO jokes (joke_id, category, joke, flags) VALUES (?, ?, ?, ?)", 
+                (joke['id'], joke['category'], joke['joke'], safe),
+            )
+            db.commit()
+        except db.IntegrityError:
+            error = f"joke with id: {joke['id']} already exists"
+
+    return error
 
