@@ -1,0 +1,7 @@
+CREATE TABLE jokes(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    joke_id INTEGER UNIQUE NOT NULL,
+    category TEXT NOT NULL,
+    joke TEXT NOT NULL,
+    flags INTEGER NOT NULL
+);
